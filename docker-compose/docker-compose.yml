@@ -1,0 +1,112 @@
+version: "3.8"
+
+services:
+  eurekaservice:
+    build: ../eureka-service
+    environment:
+      - SPRING_PROFILES_ACTIVE=dev
+    ports:
+      - "8761:8761"
+    networks:
+      - hrms-net
+
+  db:
+    image: mysql:8.0
+    container_name: mysql-hrms
+    environment:
+      - MYSQL_ROOT_PASSWORD=root
+      - MYSQL_USER=hrms
+      - MYSQL_PASSWORD=hrms
+    ports:
+      - "3306:3306"
+    volumes:
+      - ./data:/var/lib/mysql
+      - ./db-setup-script.sql:/docker-entrypoint-initdb.d/db-setup-script.sql
+    networks:
+      - hrms-net
+
+  configservice:
+    build: ../config-service
+    ports:
+      - "8888:8888"
+    environment:
+      - SPRING_PROFILES_ACTIVE=dev
+    depends_on:
+      - db
+      - eurekaservice
+    networks:
+      - hrms-net
+
+  oauth2-authentication-service:
+    build: ../oauth2-authentication-service
+    ports:
+      - "8060:8060"
+    environment:
+      - SPRING_PROFILES_ACTIVE=dev
+    entrypoint: sh -c './wait-for.sh --timeout=120 configservice:8888 -- echo "Config service is up and starting OAuth service" && java -jar oauth2_authentication_service-1.0-SNAPSHOT.jar'
+    depends_on:
+      - db
+      - eurekaservice
+      - configservice
+    networks:
+      - hrms-net
+
+  gatewayservice:
+    build: ../gateway-service
+    ports:
+      - "8762:8762"
+    environment:
+      - SPRING_PROFILES_ACTIVE=dev
+    entrypoint: sh -c './wait-for.sh --timeout=120 oauth2-authentication-service:8060 -- echo "OAuth service is up now starting Gateway service" && java -jar gateway-service-1.0-SNAPSHOT.jar'
+    depends_on:
+      - eurekaservice
+    networks:
+      - hrms-net
+
+  organization-service:
+    build: ../organization-service
+    ports:
+      - "8030:8030"
+    environment:
+      - SPRING_PROFILES_ACTIVE=dev
+    entrypoint: sh -c './wait-for.sh --timeout=120 gatewayservice:8762 -- echo "gatewayservice is up now starting Organization service" && java -jar organization-service-1.0-SNAPSHOT.jar'
+    depends_on:
+      - db
+      - eurekaservice
+      - configservice
+    networks:
+      - hrms-net
+
+  employee-service:
+    build: ../employee-service
+    ports:
+      - "8040:8040"
+    environment:
+      - SPRING_PROFILES_ACTIVE=dev
+    entrypoint: sh -c './wait-for.sh --timeout=180 organization-service:8030 -- echo "organization-service is up now starting Employee service" && java -jar employee-service-1.0-SNAPSHOT.jar'
+    depends_on:
+      - db
+      - eurekaservice
+      - configservice
+    networks:
+      - hrms-net
+
+  leave-service:
+    build: ../leave-service
+    ports:
+      - "8050:8050"
+    environment:
+      - SPRING_PROFILES_ACTIVE=dev
+    entrypoint: sh -c './wait-for.sh --timeout=240 employee-service:8040 -- echo "employee-service is up now starting Leave service" && java -jar leave-service-1.0-SNAPSHOT.jar'
+    depends_on:
+      - db
+      - eurekaservice
+      - configservice
+    networks:
+      - hrms-net
+
+volumes:
+  db:
+
+networks:
+  hrms-net:
